@@ -17,6 +17,10 @@
 #include <avr/eeprom.h>
 #include <avr/interrupt.h>
 
+#ifdef RIGIDBOARD
+//For DAC support, only used if #define DAC_DRIVER found in Configuration.h
+#include "mcp4728.h"
+#endif
 
 #include "fastio.h"
 #include "Configuration.h"

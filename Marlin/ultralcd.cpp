@@ -1,5 +1,13 @@
 #include "temperature.h"
 #include "ultralcd.h"
+
+#ifdef DAC_DRIVER
+#include "mcp4728.h"
+#define DAC_MIN 0
+#define DAC_MAX 5000
+#define DAC_SCALAR 50
+#endif
+
 #ifdef ULTRA_LCD
 #include "Marlin.h"
 #include "language.h"
@@ -56,6 +64,15 @@ static void lcd_control_temperature_preheat_pla_settings_menu();
 static void lcd_control_temperature_preheat_abs_settings_menu();
 static void lcd_control_motion_menu();
 static void lcd_control_retract_menu();
+#ifdef DAC_DRIVER
+static void init_dac();
+static void lcd_driver_x();
+static void lcd_driver_y();
+static void lcd_driver_z();
+static void lcd_driver_e();
+static void save_dac();
+static void lcd_dac_menu();
+#endif
 //static void lcd_utilities_menu();
 static void lcd_sdcard_menu();
 
@@ -169,6 +186,13 @@ const char* editLabel;
 void* editValue;
 int32_t minEditValue, maxEditValue;
 menuFunc_t callbackFunc;
+
+#ifdef DAC_DRIVER
+float channelVal;
+int16_t firstCall = 0;
+uint16_t driverX, driverY, driverZ, driverE;
+mcp4728 dac = mcp4728(1);
+#endif
 
 // placeholders for Ki and Kd edits
 float raw_Ki, raw_Kd;
@@ -378,6 +402,9 @@ static void lcd_prepare_menu()
 	MENU_ITEM(submenu, MSG_HEAT_COOL, lcd_heat_cool_menu);
 	MENU_ITEM(submenu, MSG_MOVE_AXIS, lcd_move_menu);
 	MENU_ITEM(submenu, MSG_FILAMENTCHANGE, lcd_filament_menu);
+#ifdef  DAC_DRIVER
+        MENU_ITEM(submenu, "DriveStrength", lcd_dac_menu);
+#endif
 	MENU_ITEM(submenu, "Bed Leveling", lcd_bed_level_menu);
 	//MENU_ITEM(gcode, MSG_SET_ORIGIN, PSTR("G92 X0 Y0 Z0"));
 	END_MENU();
@@ -407,11 +434,175 @@ MENU_ITEM_EDIT(int3, MSG_NOZZLE2, &target_temperature[2], 0, HEATER_2_MAXTEMP - 
 #endif
     MENU_ITEM_EDIT(int3, MSG_FAN_SPEED, &fanSpeed, 0, 255);
     MENU_ITEM_EDIT(int3, MSG_FLOW, &extrudemultiply, 10, 999);
+#ifdef  DAC_DRIVER
+        MENU_ITEM(submenu, "DriveStrength", lcd_dac_menu);
+#endif
 #ifdef FILAMENTCHANGEENABLE
      MENU_ITEM(gcode, MSG_FILAMENTCHANGE, PSTR("M600"));
 #endif
     END_MENU();
 }
+
+//####################################################################################################
+//	Motor Driver Gain control routines
+//####################################################################################################
+#ifdef DAC_DRIVER
+
+static void init_dac()
+{
+//	dac = mcp4728(1);
+	dac.begin(); // just use voltages?
+	delay(1000);
+	dac.setGain(0, 0, 0, 0);
+	dac.vdd(DAC_MAX);
+	
+	driverX=0;
+	driverY=0;
+	driverZ=0;
+	driverE=0;
+	
+	driverX = dac.getVout(0);
+	driverY = dac.getVout(1);
+	driverZ = dac.getVout(2);
+	driverE = dac.getVout(3);
+	
+	if(driverX>0)driverX+=1;
+	if(driverY>0)driverY+=1;
+	if(driverZ>0)driverZ+=1;
+	if(driverE>0)driverE+=1;
+	
+}
+
+static void lcd_driver_x()
+{
+	//static float a = 0;
+    if (encoderPosition != 0)
+    {
+        driverX += (int)encoderPosition * DAC_SCALAR;
+        if (driverX < DAC_MIN)
+            driverX = DAC_MIN;
+        if (driverX > DAC_MAX)
+            driverX = DAC_MAX;
+        encoderPosition = 0;
+        dac.voutWrite(driverX,driverY,driverZ,driverE);
+		lcdDrawUpdate = 1;
+    }
+    if (lcdDrawUpdate)
+    {
+        lcd_implementation_drawedit(PSTR("X Drive%"), itostr4(driverX/50));
+    }
+    if (LCD_CLICKED)
+    {
+        lcd_quick_feedback();
+        currentMenu = lcd_dac_menu;
+        encoderPosition = 0;
+    }
+}
+
+static void lcd_driver_y()
+{
+	//static float a = 0;
+	if (encoderPosition != 0)
+	{
+		driverY += (int)encoderPosition *DAC_SCALAR;
+		if (driverY < DAC_MIN)
+		driverY = DAC_MIN;
+		if (driverY > DAC_MAX)
+		driverY = DAC_MAX;
+		encoderPosition = 0;
+		dac.voutWrite(driverX,driverY,driverZ,driverE);
+		lcdDrawUpdate = 1;
+	}
+	if (lcdDrawUpdate)
+	{
+		lcd_implementation_drawedit(PSTR("Y Drive%"), itostr4(driverY/50));
+	}
+	if (LCD_CLICKED)
+	{
+		lcd_quick_feedback();
+		currentMenu = lcd_dac_menu;
+		encoderPosition = 0;
+	}
+}
+
+static void lcd_driver_z()
+{
+	//static float a = 0;
+	if (encoderPosition != 0)
+	{
+		driverZ += (int)encoderPosition * DAC_SCALAR;
+		if (driverZ < DAC_MIN)
+		driverZ = DAC_MIN;
+		if (driverZ > DAC_MAX)
+		driverZ = DAC_MAX;
+		encoderPosition = 0;
+		dac.voutWrite(driverX,driverY,driverZ,driverE);
+		lcdDrawUpdate = 1;
+	}
+	if (lcdDrawUpdate)
+	{
+		lcd_implementation_drawedit(PSTR("Z Drive%"), itostr4(driverZ/50));
+	}
+	if (LCD_CLICKED)
+	{
+		lcd_quick_feedback();
+		currentMenu = lcd_dac_menu;
+		encoderPosition = 0;
+	}
+}
+
+static void lcd_driver_e()
+{
+	//static float a = 0;
+	if (encoderPosition != 0)
+	{
+		driverE += (int)encoderPosition * DAC_SCALAR;
+		if (driverE < DAC_MIN)
+		driverE = DAC_MIN;
+		if (driverE > DAC_MAX)
+		driverE = DAC_MAX;
+		encoderPosition = 0;
+		dac.voutWrite(driverX,driverY,driverZ,driverE);
+		lcdDrawUpdate = 1;
+	}
+	if (lcdDrawUpdate)
+	{
+		lcd_implementation_drawedit(PSTR("E Drive%"), itostr4(driverE/50));
+	}
+	if (LCD_CLICKED)
+	{
+		lcd_quick_feedback();
+		currentMenu = lcd_dac_menu;
+		encoderPosition = 0;
+	}
+}
+
+static void save_dac()
+{
+	dac.eepromWrite();
+}
+
+static void lcd_dac_menu()
+{
+  // create and destroy the DAC object here
+    //int a,b,c,d = 0; //These will be used to store the 4 dac channel values for printing and editing
+	static int start = 0;
+    if (start==0)
+	{
+		init_dac();
+		start = 1;
+	}
+	START_MENU();
+	MENU_ITEM_BACK(back, MSG_MAIN, lcd_main_menu);
+    MENU_ITEM(submenu, "Drive X", lcd_driver_x);
+    MENU_ITEM(submenu, "Drive Y", lcd_driver_y);
+	MENU_ITEM(submenu, "Drive Z", lcd_driver_z);
+    MENU_ITEM(submenu, "Drive E", lcd_driver_e);
+    MENU_ITEM(function,"Save Values",save_dac);
+    END_MENU();
+}
+
+#endif
 
 //####################################################################################################
 //	Temperature control routines
